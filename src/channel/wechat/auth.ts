@@ -6,16 +6,17 @@ import {
 } from "./types.js"
 import { getQrcode, getQrcodeStatus } from "./client.js"
 import { createLogger } from "../../utils/logger.js"
+import { getCwdBase } from "../../utils/paths.js"
 
 const log = createLogger("wechat-auth")
 
 export function getDefaultSessionFile(): string {
-  const cwdBase = process.env["OPENCODE_CWD"] ?? process.cwd()
+  const cwdBase = getCwdBase()
   return path.resolve(cwdBase, ".opencode-lark", "wechat-session.json")
 }
 
 export function getDefaultDataDir(): string {
-  const cwdBase = process.env["OPENCODE_CWD"] ?? process.cwd()
+  const cwdBase = getCwdBase()
   return path.resolve(cwdBase, ".opencode-lark")
 }
 

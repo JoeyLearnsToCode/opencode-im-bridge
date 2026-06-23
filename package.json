@@ -33,6 +33,7 @@
     "start": "bun run src/index.ts",
     "dev": "bun --watch run src/index.ts",
     "build": "tsc",
+    "link": "bun link",
     "test": "bun node_modules/.bin/vitest",
     "test:run": "bun node_modules/.bin/vitest run",
     "test:coverage": "bun node_modules/.bin/vitest run --coverage"

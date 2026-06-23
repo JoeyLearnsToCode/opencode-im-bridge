@@ -94,6 +94,13 @@ const LauncherConfigSchema = z.object({
   probeTimeoutMs: z.number().int().positive().default(4000),
 })
 
+const ServerConfigSchema = z.object({
+  host: z.string().default("127.0.0.1"),
+  port: z.number().int().min(1).max(65535).default(4096),
+  username: z.string().optional(),
+  password: z.string().optional(),
+})
+
 const AppConfigSchema = z.object({
   feishu: FeishuConfigSchema.optional(),
   qq: QqConfigSchema.optional(),
@@ -107,12 +114,14 @@ const AppConfigSchema = z.object({
   cron: CronConfigSchema.optional(),
   heartbeat: HeartbeatConfigSchema.optional(),
   launcher: LauncherConfigSchema.optional(),
+  server: ServerConfigSchema.optional(),
   messageDebounceMs: z.number().int().min(0).optional().default(10000),
 }).refine(data => data.feishu || data.qq || data.telegram || data.discord || data.wechat || data.dingtalk, {
   message: "At least one channel (feishu, qq, telegram, discord, wechat, or dingtalk) must be configured."
 })
 
 export type AppConfig = z.infer<typeof AppConfigSchema>
+export type ServerConfig = z.infer<typeof ServerConfigSchema>
 export type CronConfig = z.infer<typeof CronConfigSchema>
 export type CronJobConfig = z.infer<typeof CronJobSchema>
 export type HeartbeatConfig = z.infer<typeof HeartbeatConfigSchema>
@@ -129,6 +138,25 @@ function interpolateEnvVars(text: string): string {
   })
 }
 
+/**
+ * Resolve a password value.
+ * Supports `env:VAR_NAME` syntax — looks up the named environment variable.
+ * Returns the raw string for all other inputs.
+ */
+export function resolvePassword(raw: string): string {
+  if (raw.startsWith("env:")) {
+    const envVarName = raw.slice(4)
+    const value = process.env[envVarName]
+    if (!value) {
+      throw new Error(
+        `Environment variable ${envVarName} referenced in server.password is not set`,
+      )
+    }
+    return value
+  }
+  return raw
+}
+
 /** Strip JSONC comments (// and /* *​/) for JSON.parse */
 function stripJsoncComments(text: string): string {
   return text
@@ -137,13 +165,16 @@ function stripJsoncComments(text: string): string {
 }
 
 export async function loadConfig(configPath?: string): Promise<AppConfig> {
-  const searchPaths = configPath
-    ? [configPath]
+  const p = (configPath && fs.existsSync(configPath)) ? configPath : process.cwd()
+  const stat = fs.statSync(p)
+  const searchPaths = stat.isFile()
+    ? [p]
     : [
-      path.resolve("opencode-lark.jsonc"),
-      path.resolve("opencode-lark.json"),
-      path.resolve("opencode-feishu.jsonc"),
-      path.resolve("opencode-feishu.json"),
+      path.resolve(p, "opencode-im-bridge.jsonc"),
+      path.resolve(p, "opencode-lark.jsonc"),
+      path.resolve(p, "opencode-lark.json"),
+      path.resolve(p, "opencode-feishu.jsonc"),
+      path.resolve(p, "opencode-feishu.json"),
     ]
 
   let rawText: string | undefined

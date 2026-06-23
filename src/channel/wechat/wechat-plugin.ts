@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises"
-import { basename } from "node:path"
+import path, { basename } from "node:path"
 import { WeChatBot, type IncomingMessage } from "@wechatbot/wechatbot"
 import { BaseChannelPlugin } from "../base-plugin.js"
 import type {
@@ -21,6 +21,7 @@ import type { AppConfig } from "../../utils/config.js"
 import type { Logger } from "../../utils/logger.js"
 
 export interface WechatPluginDeps {
+  cwdBase: string
   appConfig: AppConfig
   logger: Logger
   onMessage?: (event: any) => Promise<void>
@@ -34,6 +35,7 @@ export class WechatPlugin extends BaseChannelPlugin {
     description: "微信 iLink Bot API channel integration (via @wechatbot/wechatbot)",
   }
 
+  private readonly cwdBase: string
   private readonly appConfig: AppConfig
   private readonly logger: Logger
   private bot: WeChatBot | null = null
@@ -53,6 +55,7 @@ export class WechatPlugin extends BaseChannelPlugin {
 
   constructor(deps: WechatPluginDeps) {
     super()
+    this.cwdBase = deps.cwdBase
     this.appConfig = deps.appConfig
     this.logger = deps.logger
 
@@ -69,12 +72,14 @@ export class WechatPlugin extends BaseChannelPlugin {
     this.gateway = {
       startAccount: async (_accountId: string, signal: AbortSignal): Promise<void> => {
         const wechatConfig = this.appConfig.wechat!
-        
+
         this.bot = new WeChatBot({
           storage: "file",
-          storageDir: wechatConfig.sessionFile 
-            ? this.getDirName(wechatConfig.sessionFile)
-            : undefined,
+          storageDir: wechatConfig.sessionFile
+            ? (path.isAbsolute(wechatConfig.sessionFile) ?
+              wechatConfig.sessionFile :
+              this.getDirName(path.resolve(this.cwdBase, wechatConfig.sessionFile))
+            ) : path.resolve(this.cwdBase, 'data'),
           logLevel: "info",
           loginCallbacks: {
             onQrUrl: (url: string) => {
@@ -279,7 +284,7 @@ export class WechatPlugin extends BaseChannelPlugin {
           target,
           pendingUpdates: [],
           createdAt: Date.now(),
-          flush: async () => {},
+          flush: async () => { },
         }
         return session
       },

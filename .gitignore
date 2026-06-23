@@ -21,3 +21,4 @@ inferencesh-cli-windows-amd64.tar.gz
 .agents/workflows/publish.md
 
 .opencode/opencode.jsonc
+opencode-im-bridge.jsonc

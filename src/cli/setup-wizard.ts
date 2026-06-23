@@ -27,6 +27,7 @@ const bold = (s: string) => `\x1b[1m${s}\x1b[0m`
 
 /** Config file search paths — must match src/utils/config.ts lines 69-76 */
 const CONFIG_SEARCH_PATHS = [
+  path.resolve("opencode-im-bridge.jsonc"),
   path.resolve("opencode-lark.jsonc"),
   path.resolve("opencode-lark.json"),
   path.resolve("opencode-feishu.jsonc"),
@@ -125,7 +126,7 @@ function readSecret(prompt: string): Promise<string> {
  * Interactive config picker for multiple Feishu accounts.
  * Returns the selected env file path, or null if no configs exist.
  */
-export async function pickConfig(): Promise<string | null> {
+export async function pickEnv(): Promise<string | null> {
   const envFiles = listEnvFiles()
     .sort((a, b) => a.appId.localeCompare(b.appId) || a.filePath.localeCompare(b.filePath))
 
@@ -161,7 +162,7 @@ export async function pickConfig(): Promise<string | null> {
     if (!process.stdin.isTTY && envFiles.length > 1) {
       process.stdout.write(`Non-interactive environment detected. Auto-selecting config 1: ${first.appId}\n`)
     } else {
-      process.stdout.write(`Auto-selecting config: ${first.appId}\n`)
+      process.stdout.write(`Auto-selecting config: ${first.appId} at ${first.filePath}\n`)
     }
     return first.filePath
   }

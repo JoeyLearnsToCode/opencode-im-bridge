@@ -49,8 +49,9 @@ import { HeartbeatService } from "./cron/heartbeat.js"
 import { scheduledTaskRuntime } from "./scheduled-task/runtime.js"
 import type { TaskDelivery } from "./scheduled-task/types.js"
 import { bootstrapLauncherEnv, loadEnvFile } from "./utils/env-loader.js"
-import { needsSetup, runSetupWizard, pickConfig } from "./cli/setup-wizard.js"
+import { needsSetup, runSetupWizard, pickEnv } from "./cli/setup-wizard.js"
 import { createServiceLauncher } from "./reliability/service-launcher.js"
+import { getCwdBase } from "./utils/paths.js"
 
 const logger = createLogger("opencode-im")
 
@@ -76,9 +77,9 @@ async function main(): Promise<void> {
   if (forceInit) {
     await runSetupWizard()
   } else {
-    const configPath = await pickConfig()
-    if (configPath) {
-      loadEnvFile(configPath)
+    const envPath = await pickEnv()
+    if (envPath) {
+      loadEnvFile(envPath)
     } else if (await needsSetup()) {
       await runSetupWizard()
     }
@@ -92,7 +93,8 @@ async function main(): Promise<void> {
   // ═══════════════════════════════════════════
   logger.info("@@@@@ opencode-im starting PRECISE VERSION @@@@@")
   logger.info("Phase 1: Loading config...")
-  const config = await loadConfig()
+  const cwdBase = getCwdBase()
+  const config = await loadConfig(cwdBase)
 
   if ((!config.feishu?.appId || !config.feishu?.appSecret) && (!config.qq?.appId || !config.qq?.secret) && !config.telegram?.botToken && !config.discord?.botToken && !config.wechat?.enabled) {
     logger.error(
@@ -106,11 +108,52 @@ async function main(): Promise<void> {
   // Phase 2: Connect to Opencode Server
   // ═══════════════════════════════════════════
   logger.info("Phase 2: Connecting to opencode server...")
-  const serverUrl = (
-    process.env.OPENCODE_SERVER_URL ?? "http://localhost:4096"
-  ).replace("localhost", "127.0.0.1")
-  const opencodeDirectory = process.env.OPENCODE_CWD || process.cwd()
-  logger.info(`Connecting to opencode server at ${serverUrl} (directory: ${opencodeDirectory})`)
+
+  // Resolve server URL — config.server takes precedence, then env var, then default
+  const configuredUrl = config.server
+    ? `http://${config.server.host}:${config.server.port}`
+    : undefined
+  const serverUrl = (process.env.OPENCODE_SERVER_URL ?? configuredUrl ?? "http://localhost:4096")
+    .replace("localhost", "127.0.0.1")
+
+  // Resolve Basic Auth headers from config
+  let authHeaders: Record<string, string> | undefined
+  if (config.server?.username && config.server?.password) {
+    const { resolvePassword } = await import("./utils/config.js")
+    const password = resolvePassword(config.server.password)
+    authHeaders = {
+      "Authorization": `Basic ${Buffer.from(`${config.server.username}:${password}`).toString("base64")}`,
+    }
+    logger.info(`Using Basic Auth for opencode server (user: ${config.server.username})`)
+  }
+
+  // Inject auth into ALL fetch() calls to the opencode server origin
+  if (authHeaders) {
+    const origin = new URL(serverUrl).origin
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = function (this: any, input: any, init?: any) {
+      let url: string | undefined
+      if (input instanceof URL) url = input.href
+      else if (typeof input === "string") url = input
+      else if (input?.url) url = input.url
+      if (url && url.startsWith(origin)) {
+        const merged: Record<string, string> = { ...authHeaders }
+        if (init?.headers) {
+          if (init.headers instanceof Headers) {
+            init.headers.forEach((v: string, k: string) => { merged[k] = v })
+          } else if (Array.isArray(init.headers)) {
+            for (const [k, v] of init.headers) merged[k] = v as string
+          } else {
+            Object.assign(merged, init.headers)
+          }
+        }
+        return originalFetch.call(this, input, { ...init, headers: merged })
+      }
+      return originalFetch.call(this, input, init)
+    } as typeof globalThis.fetch
+  }
+
+  logger.info(`Connecting to opencode server at ${serverUrl} (directory: ${cwdBase})`)
   const serviceLauncher = config.launcher
     ? createServiceLauncher({
       config: config.launcher,
@@ -120,9 +163,10 @@ async function main(): Promise<void> {
     : undefined
   const client = createOpencodeClient({
     baseUrl: serverUrl,
-    directory: opencodeDirectory,
+    directory: cwdBase,
+    ...(authHeaders ? { headers: authHeaders } : {}),
   })
-  const normalizedOpencodeDirectory = normalizeDirectory(opencodeDirectory)
+  const normalizedOpencodeDirectory = normalizeDirectory(cwdBase)
 
   function normalizeDirectory(directory: string): string {
     const resolved = resolve(directory)
@@ -162,7 +206,7 @@ async function main(): Promise<void> {
   // Phase 3: Database Init
   // ═══════════════════════════════════════════
   logger.info("Phase 3: Initializing database...")
-  const db = initDatabase(config.dataDir)
+  const db = initDatabase(config.dataDir, cwdBase)
 
   // ═══════════════════════════════════════════
   // Phase 4: Create Shared Services
@@ -526,6 +570,7 @@ async function main(): Promise<void> {
   if (config.wechat) {
     const { WechatPlugin } = await import("./channel/wechat/index.js")
     const wechatPlugin = new WechatPlugin({
+      cwdBase: cwdBase,
       appConfig: config,
       logger,
       onMessage: handleMessage,

@@ -16,9 +16,9 @@ export interface AppDatabase {
   close(): void
 }
 
-export function initDatabase(dataDir: string): AppDatabase {
+export function initDatabase(dataDir: string, cwdBase: string): AppDatabase {
   // Ensure data directory exists
-  const resolvedDir = path.resolve(dataDir)
+  const resolvedDir = path.isAbsolute(dataDir) ? path.resolve(dataDir) : path.resolve(cwdBase, dataDir)
   if (!fs.existsSync(resolvedDir)) {
     fs.mkdirSync(resolvedDir, { recursive: true })
     logger.info(`Created data directory: ${resolvedDir}`)

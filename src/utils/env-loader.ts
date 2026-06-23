@@ -9,8 +9,8 @@ import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 
-/** Fixed config directory for all opencode-lark configs */
-export const CONFIG_DIR = path.join(os.homedir(), ".config", "opencode-lark")
+/** Fixed config directory for all opencode-im-bridge configs */
+export const CONFIG_DIR = path.join(os.homedir(), ".config", "opencode-im-bridge")
 export const DEFAULT_SERVER_URL = "http://localhost:4096"
 export const DEFAULT_LAUNCHER_COMMAND = "opencode serve"
 
@@ -26,19 +26,28 @@ export function ensureConfigDir(): void {
  * E.g. `.env.cli_abc123` → appId "cli_abc123"
  */
 export function listEnvFiles(): Array<{ appId: string, filePath: string }> {
-  if (!fs.existsSync(CONFIG_DIR)) return []
+  function listEnvFilesIn(dir: string): Array<{ appId: string, filePath: string }> {
+    if (!fs.existsSync(dir)) return []
 
-  const entries = fs.readdirSync(CONFIG_DIR)
-  const results: Array<{ appId: string, filePath: string }> = []
+    const entries = fs.readdirSync(dir)
+    const results: Array<{ appId: string, filePath: string }> = []
 
-  for (const entry of entries) {
-    if (entry.startsWith(".env.") && entry.length > 5) {
-      const appId = entry.slice(5) // strip ".env."
-      results.push({ appId, filePath: path.join(CONFIG_DIR, entry) })
+    for (const entry of entries) {
+      if (entry.includes("example")) continue
+      if (entry.startsWith(".env.") && entry.length > 5) {
+        const appId = entry.slice(5) // strip ".env."
+        results.push({ appId, filePath: path.join(dir, entry) })
+      }
+      if (entry === ".env") {
+        results.push({ appId: "default", filePath: path.join(dir, entry) })
+      }
     }
-  }
 
-  return results
+    return results
+  }
+  const envFiles1 = listEnvFilesIn(CONFIG_DIR);
+  const envFiles2 = listEnvFilesIn(process.cwd());
+  return envFiles1.concat(envFiles2);
 }
 
 export function loadEnvFile(filePath?: string): void {
