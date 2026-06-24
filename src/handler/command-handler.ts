@@ -17,7 +17,6 @@ import { t, getLocale } from "../i18n/index.js"
 import type { ChannelManager } from "../channel/manager.js"
 
 import { readFile, writeFile } from "node:fs/promises"
-import { join, resolve } from "node:path"
 import { homedir } from "node:os"
 
 import {
@@ -38,6 +37,8 @@ import { scheduledTaskRuntime } from "../scheduled-task/runtime.js"
 import type { TaskDisplayItem, ScheduledTask } from "../scheduled-task/types.js"
 import { CronJob } from "cron"
 import type { ServiceLauncher } from "../reliability/service-launcher.js"
+import path from "node:path"
+import { normalizePath } from "../utils/paths.js"
 
 export interface CommandHandlerDeps {
   serverUrl: string
@@ -305,17 +306,19 @@ export function createCommandHandler(deps: CommandHandlerDeps): CommandHandler {
     messageId: string,
     channelId: string,
   ): Promise<void> {
-    const resp = await fetch(`${serverUrl}/session`, {
+    const resp = await fetch(`${serverUrl}/api/session`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify({
+        location: { directory: normalizePath(process.env.SESSION_CWD ?? process.env.OPENCODE_CWD ?? "") },
+      }),
     })
 
     if (!resp.ok) {
       throw new Error(`Failed to create session: HTTP ${resp.status}`)
     }
 
-    const data = (await resp.json()) as { id: string }
+    const { data } = (await resp.json()) as { data: { id: string } }
     sessionManager.setMapping(feishuKey, data.id)
     logger.info(`/new: created session ${data.id}, bound to ${feishuKey}`)
     await replyText(chatId, messageId, t(getLocale(channelId), "command.newSession", { sessionId: data.id }), channelId)
@@ -600,12 +603,16 @@ export function createCommandHandler(deps: CommandHandlerDeps): CommandHandler {
     channelId: string,
   ): Promise<void> {
     const locale = getLocale(channelId)
-    const resp = await fetch(`${serverUrl}/session`)
+    const dir = process.env.SESSION_CWD ?? process.env.OPENCODE_CWD ?? process.cwd()
+    const sessionsURL = `${serverUrl}/api/session?directory=${encodeURIComponent(normalizePath(dir))}`
+    const resp = await fetch(sessionsURL)
     if (!resp.ok) {
       throw new Error(`List sessions failed: HTTP ${resp.status}`)
     }
 
-    const sessions = (await resp.json()) as Session[]
+    const body = (await resp.json()) as { data: Session[]; cursor?: unknown }
+    console.log(`body: ${JSON.stringify(body)}`)
+    const sessions = body.data
     if (sessions.length === 0) {
       await replyText(chatId, messageId, t(locale, "command.noSessions"), channelId)
       return
@@ -731,51 +738,53 @@ export function createCommandHandler(deps: CommandHandlerDeps): CommandHandler {
       }
 
       const projects = (await resp.json()) as ProjectInfo[]
-      const normalizedArg = targetProjectArg.replace(/\\/g, "/").toLowerCase()
-
+      const normalizedArg = normalizePath(targetProjectArg).toLowerCase()
       const matched = projects.find((p) => {
         const name = p.name || p.worktree.split("/").pop() || p.worktree
-        const normalizedName = name.replace(/\\/g, "/").toLowerCase()
-        const normalizedWorktree = p.worktree.replace(/\\/g, "/").toLowerCase()
+        const normalizedName = normalizePath(name).toLowerCase()
+        const normalizedWorktree = normalizePath(p.worktree).toLowerCase()
         return normalizedName === normalizedArg || normalizedWorktree === normalizedArg || p.id === normalizedArg
       })
 
       if (!matched) {
         await replyText(chatId, messageId, t(locale, "command.projectCreating", { project: targetProjectArg }), channelId)
 
-        const newProjectDir = resolve(targetProjectArg)
-
-        const createResp = await fetch(`${serverUrl}/session?directory=${encodeURIComponent(newProjectDir)}`, {
+        const newProjectDir = normalizePath(path.resolve(targetProjectArg))
+        const createResp = await fetch(`${serverUrl}/api/session`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title: targetProjectArg }),
+          body: JSON.stringify({
+            location: { directory: newProjectDir },
+          }),
         })
-
         if (!createResp.ok) {
           const errText = await createResp.text()
           await replyText(chatId, messageId, t(locale, "command.projectCreateFailed", { project: targetProjectArg, error: errText }), channelId)
           return
         }
 
-        const newData = (await createResp.json()) as { id: string; directory?: string }
-        process.env.OPENCODE_CWD = newData.directory || newProjectDir
+        const createRespBody = (await createResp.json()) as { data: { id: string; directory?: string } }
+        const newData = createRespBody.data
+        process.env.SESSION_CWD = normalizePath(newData.directory || newProjectDir)
         sessionManager.setMapping(feishuKey, newData.id)
         logger.info(`/projects: created and switched to project "${targetProjectArg}" (${newData.directory || newProjectDir})`)
         await replyText(chatId, messageId, t(locale, "command.projectCreated", { project: targetProjectArg, sessionId: newData.id }), channelId)
         return
       }
 
-      process.env.OPENCODE_CWD = matched.worktree
+      process.env.SESSION_CWD = normalizePath(matched.worktree)
       logger.info(`/projects: switched to project "${matched.name || matched.worktree}" (${matched.worktree})`)
 
-      const newSessionResp = await fetch(`${serverUrl}/session`, {
+      const newSessionResp = await fetch(`${serverUrl}/api/session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: matched.id }),
+        body: JSON.stringify({
+          location: { directory: process.env.SESSION_CWD ?? process.env.OPENCODE_CWD },
+        }),
       })
 
       if (newSessionResp.ok) {
-        const data = (await newSessionResp.json()) as { id: string }
+        const { data } = (await newSessionResp.json()) as { data: { id: string } }
         sessionManager.setMapping(feishuKey, data.id)
         await replyText(chatId, messageId, t(locale, "command.projectSwitched", { project: matched.name || matched.worktree, sessionId: data.id }), channelId)
       } else {
@@ -1328,7 +1337,7 @@ export function createCommandHandler(deps: CommandHandlerDeps): CommandHandler {
   async function getFavoriteAndRecentFromFile(): Promise<{ favorites: string[], recent: string[] }> {
     try {
       const home = homedir()
-      const statePath = join(home, ".local", "state", "opencode", "model.json")
+      const statePath = path.join(home, ".local", "state", "opencode", "model.json")
       const content = await readFile(statePath, "utf-8")
       const state = JSON.parse(content) as {
         favorite?: Array<{ providerID?: string; modelID?: string }>
@@ -1429,7 +1438,7 @@ export function createCommandHandler(deps: CommandHandlerDeps): CommandHandler {
 
     try {
       const home = homedir()
-      const statePath = join(home, ".local", "state", "opencode", "model.json")
+      const statePath = path.join(home, ".local", "state", "opencode", "model.json")
       const stateContent = await readFile(statePath, "utf-8").catch(() => '{"favorite":[],"recent":[]}')
       const state = JSON.parse(stateContent) as {
         favorite?: Array<{ providerID: string; modelID: string }>
@@ -1514,21 +1523,21 @@ export function createCommandHandler(deps: CommandHandlerDeps): CommandHandler {
 
       try {
         const home = homedir()
-        const statePath = join(home, ".local", "state", "opencode", "model.json")
+        const statePath = path.join(home, ".local", "state", "opencode", "model.json")
         const stateContent = await readFile(statePath, "utf-8").catch(() => '{"favorite":[],"recent":[]}')
         const state = JSON.parse(stateContent) as {
           favorite?: Array<{ providerID: string; modelID: string }>
         }
 
-      if (state.favorite && state.favorite.length > 0) {
-        const [_prov, ...rest] = matched.id.split("/")
-        const modelWithVariant = rest.join("/")
-        const firstFavorite = state.favorite[0]
-        if (firstFavorite) {
-          firstFavorite.modelID = modelWithVariant
-          await writeFile(statePath, JSON.stringify(state, null, 2))
+        if (state.favorite && state.favorite.length > 0) {
+          const [_prov, ...rest] = matched.id.split("/")
+          const modelWithVariant = rest.join("/")
+          const firstFavorite = state.favorite[0]
+          if (firstFavorite) {
+            firstFavorite.modelID = modelWithVariant
+            await writeFile(statePath, JSON.stringify(state, null, 2))
+          }
         }
-      }
       } catch (err) {
         logger.warn(`Failed to write model.json for variant: ${err}`)
       }
@@ -1699,6 +1708,9 @@ export function createCommandHandler(deps: CommandHandlerDeps): CommandHandler {
     }
 
     lines.push(t(locale, "status.directory", { dir: process.env.OPENCODE_CWD || process.cwd() }))
+    if (process.env.SESSION_CWD && process.env.SESSION_CWD !== (process.env.OPENCODE_CWD || process.cwd())) {
+      lines.push(t(locale, "status.sessionDir", { dir: process.env.SESSION_CWD }))
+    }
 
     const statusText = lines.join("\n")
     await replyText(chatId, messageId, statusText, channelId)

@@ -87,6 +87,7 @@ export const zhCN = {
     sessionUnbound: "💬 会话: 未绑定",
     hintStart: "💡 发送 /new 或任意消息以开始",
     directory: "📂 目录: {dir}",
+    sessionDir: "📂 会话目录: {dir}",
   },
   message: {
     unsupportedType: "不支持的消息类型: {type} (渠道: {channel})，仅支持 {supported}。",

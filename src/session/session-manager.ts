@@ -1,6 +1,7 @@
 import { type Database } from "bun:sqlite"
 import { createLogger } from "../utils/logger.js"
 import type { SessionMapping } from "../types.js"
+import { getCwdBase } from "../utils/paths.js"
 
 const logger = createLogger("session-manager")
 
@@ -20,10 +21,6 @@ export interface SessionManager {
   setModel(feishuKey: string, model: string | null): boolean
   cleanup(maxAgeMs?: number): number
   validateAndCleanupStale(): Promise<number>
-}
-
-function getWorkingDirectory(): string {
-  return process.env.OPENCODE_CWD || process.cwd()
 }
 
 interface TuiSession {
@@ -102,7 +99,7 @@ export function createSessionManager(
   }
 
   async function discoverTuiSession(): Promise<TuiSession | null> {
-    const cwd = getWorkingDirectory()
+    const cwd = getCwdBase()
     const url = `${serverUrl}/session?roots=true&limit=1&directory=${encodeURIComponent(cwd)}`
 
     try {

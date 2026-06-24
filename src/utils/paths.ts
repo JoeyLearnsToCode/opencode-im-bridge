@@ -7,3 +7,7 @@ export function getAttachmentsDir(): string {
 export function getCwdBase(): string {
   return process.env["OPENCODE_CWD"] ?? process.cwd()
 }
+
+export function normalizePath(p: string): string {
+  return p.replace(/\\+/g, "/")
+}

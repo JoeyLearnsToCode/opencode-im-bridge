@@ -87,6 +87,7 @@ export const en = {
     sessionUnbound: "💬 Session: Unbound",
     hintStart: "💡 Send /new or any message to start",
     directory: "📂 Directory: {dir}",
+    sessionDir: "📂 Session directory: {dir}",
   },
   message: {
     unsupportedType: "Unsupported message type: {type} for channel {channel}. Only {supported} are supported.",
