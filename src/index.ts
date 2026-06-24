@@ -52,6 +52,8 @@ import { bootstrapLauncherEnv, loadEnvFile } from "./utils/env-loader.js"
 import { needsSetup, runSetupWizard, pickEnv } from "./cli/setup-wizard.js"
 import { createServiceLauncher } from "./reliability/service-launcher.js"
 import { getCwdBase } from "./utils/paths.js"
+import { ChannelTargetTracker } from "./api/target-tracker.js"
+import { createApiServer } from "./api/api-server.js"
 
 const logger = createLogger("opencode-im")
 
@@ -240,7 +242,13 @@ async function main(): Promise<void> {
 
   const channelManager = new ChannelManager({ logger })
 
-  // Phase 4a: Discover server defaults for agent and model
+  // Phase 4a: Initialize channel target tracker (for notification API)
+  const targetTracker = new ChannelTargetTracker(
+    resolve(cwdBase, config.dataDir),
+  )
+  await targetTracker.init()
+
+  // Phase 4b: Discover server defaults for agent and model
   let defaultAgent = config.defaultAgent
   let defaultModel: string | null = null
 
@@ -587,6 +595,9 @@ async function main(): Promise<void> {
     channelManager.register(dingtalkPlugin)
   }
 
+  // Wrap all registered plugins' outbound.sendText to record last-used targets
+  channelManager.wrapOutbound(targetTracker)
+
   // ═══════════════════════════════════════════
   // Phase 7: Start Channels + Webhook Server
   // ═══════════════════════════════════════════
@@ -620,8 +631,15 @@ async function main(): Promise<void> {
   }
 
   // ═══════════════════════════════════════════
-  // Phase 8: Optional Services (Heartbeat)
+  // Phase 8: Optional Services (Heartbeat, API)
   // ═══════════════════════════════════════════
+  let apiServer: { start(): Promise<void>; stop(): Promise<void> } | undefined
+  if (config.api?.enabled) {
+    logger.info("Starting notification API server...")
+    apiServer = createApiServer(config.api, channelManager, targetTracker, logger)
+    await apiServer.start()
+  }
+
   let heartbeatService: HeartbeatService | undefined
 
   if (config.heartbeat) {
@@ -700,6 +718,7 @@ async function main(): Promise<void> {
       abortController.abort()
       await channelManager.stopAll()
       if (webhookServer) await webhookServer.close()
+      await apiServer?.stop()
       heartbeatService?.stop()
       await scheduledTaskRuntime.shutdown()
       interactivePoller?.stop()

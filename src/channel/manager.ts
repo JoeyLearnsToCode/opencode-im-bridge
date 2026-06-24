@@ -5,6 +5,7 @@
 
 import type { ChannelPlugin, ChannelId } from "./types.js"
 import type { Logger } from "../utils/logger.js"
+import type { ChannelTargetTracker } from "../api/target-tracker.js"
 
 export interface ChannelManagerOptions {
   logger: Logger
@@ -24,6 +25,23 @@ export class ChannelManager {
   register(plugin: ChannelPlugin): void {
     this.channels.set(plugin.id, plugin)
     this.logger.info(`Channel registered: ${plugin.id}`)
+  }
+
+  /**
+   * Wrap all registered plugins' outbound.sendText to record the last target address
+   * via ChannelTargetTracker, so the notification API knows where to send.
+   */
+  wrapOutbound(tracker: ChannelTargetTracker): void {
+    for (const plugin of this.channels.values()) {
+      if (plugin.outbound?.sendText) {
+        const originalSendText = plugin.outbound.sendText.bind(plugin.outbound)
+        const channelId = plugin.id
+        plugin.outbound.sendText = async (target, text) => {
+          tracker.recordTarget(channelId, target.address)
+          return originalSendText(target, text)
+        }
+      }
+    }
   }
 
   /**

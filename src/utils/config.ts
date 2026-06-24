@@ -94,6 +94,12 @@ const LauncherConfigSchema = z.object({
   probeTimeoutMs: z.number().int().positive().default(4000),
 })
 
+const ApiConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  port: z.number().int().min(1).max(65535).default(3002),
+  host: z.string().default("127.0.0.1"),
+})
+
 const ServerConfigSchema = z.object({
   host: z.string().default("127.0.0.1"),
   port: z.number().int().min(1).max(65535).default(4096),
@@ -114,6 +120,7 @@ const AppConfigSchema = z.object({
   cron: CronConfigSchema.optional(),
   heartbeat: HeartbeatConfigSchema.optional(),
   launcher: LauncherConfigSchema.optional(),
+  api: ApiConfigSchema.optional(),
   server: ServerConfigSchema.optional(),
   messageDebounceMs: z.number().int().min(0).optional().default(10000),
 }).refine(data => data.feishu || data.qq || data.telegram || data.discord || data.wechat || data.dingtalk, {
@@ -121,6 +128,7 @@ const AppConfigSchema = z.object({
 })
 
 export type AppConfig = z.infer<typeof AppConfigSchema>
+export type ApiConfig = z.infer<typeof ApiConfigSchema>
 export type ServerConfig = z.infer<typeof ServerConfigSchema>
 export type CronConfig = z.infer<typeof CronConfigSchema>
 export type CronJobConfig = z.infer<typeof CronJobSchema>

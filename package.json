@@ -33,6 +33,7 @@
     "start": "bun run src/index.ts",
     "dev": "bun --watch run src/index.ts",
     "build": "tsc",
+    "build:bin": "bun build bin/opencode-im-bridge.js --compile",
     "link": "bun link",
     "test": "bun node_modules/.bin/vitest",
     "test:run": "bun node_modules/.bin/vitest run",

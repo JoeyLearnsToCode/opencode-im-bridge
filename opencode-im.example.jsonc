@@ -62,6 +62,15 @@
     "probeTimeoutMs": 4000
   }
 
+  // Optional: notification API server configuration
+  // When enabled, exposes POST /api/notify to push messages to all active channels
+  // using the last-used chat target for each channel (auto-tracked from outbound messages).
+  // "api": {
+  //   "enabled": true,
+  //   "port": 3002,
+  //   "host": "127.0.0.1"
+  // }
+
   // Optional: cron jobs configuration
   // "cron": {
   //   "jobs": [
