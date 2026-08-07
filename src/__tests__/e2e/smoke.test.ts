@@ -67,6 +67,7 @@ function createMockSessionManager(sessionId = "ses-e2e-1"): SessionManager {
     getExisting: vi.fn().mockReturnValue(null),
     deleteMapping: vi.fn(),
     setMapping: vi.fn(),
+    findRecentSession: vi.fn().mockResolvedValue(null),
     validateAndCleanupStale: vi.fn().mockResolvedValue(0),
     cleanup: vi.fn().mockReturnValue(0),
   } as any

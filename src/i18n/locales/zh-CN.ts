@@ -42,6 +42,7 @@ export const zhCN = {
     projectCreated: "已创建并切换到项目: {project}\n新会话: {sessionId}",
     projectCreateFailed: "创建项目失败: {project}\n{error}",
     projectSwitched: "已切换到项目: {project}\n新会话: {sessionId}",
+    projectResumed: "已切换到项目: {project}\n已复用最近会话: {sessionId}",
     projectSwitchedNoSession: "已切换到项目: {project}",
     wakeUnavailable: "未配置唤醒器。请先设置 launcher.enabled、launcher.autoStartServer 和 launcher.serverCommand。",
     wakeStarting: "正在唤醒 opencode 服务端，请稍候...",

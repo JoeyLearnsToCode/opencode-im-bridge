@@ -28,6 +28,7 @@ function createMockSessionManager(): SessionManager {
     deleteMapping: vi.fn().mockReturnValue(true),
     setMapping: vi.fn().mockReturnValue(true),
     setModel: vi.fn().mockReturnValue(true),
+    findRecentSession: vi.fn().mockResolvedValue(null),
     cleanup: vi.fn().mockReturnValue(0),
     validateAndCleanupStale: vi.fn().mockResolvedValue(0),
   }

@@ -10,6 +10,7 @@ The source of truth for thread→session mappings.
 Key methods:
 - `getOrCreate(threadKey)` — returns the session bound to a thread, creating a new binding if none exists. When creating, it queries the opencode API to discover live sessions for the configured working directory, then picks the most recently active one.
 - `getExisting(threadKey)` — returns the current session ID for a thread without creating anything. Returns `undefined` if the thread isn't connected. Use this for read-only operations (e.g. `/sessions` command) to avoid accidentally spawning sessions.
+- `findRecentSession(directory)` — queries the opencode global API (`/api/session?directory=...`) for the most recently active root session in the given directory, returning its ID or `null` when none exists. Used by `/projects` to reuse an existing project's latest session instead of creating a new one.
 
 Mappings are persisted in SQLite (via `src/utils/db.ts`) so bindings survive process restarts. A thread stays bound to its session until explicitly disconnected (via `/new` or `/connect`).
 

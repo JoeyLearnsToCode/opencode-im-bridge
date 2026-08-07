@@ -601,7 +601,14 @@ export function createCommandHandler(deps: CommandHandlerDeps): CommandHandler {
     chatId: string,
     messageId: string,
     channelId: string,
+    args: string[] = [],
   ): Promise<void> {
+    const targetSessionId = args[0]
+    if (targetSessionId) {
+      await handleConnect(feishuKey, chatId, messageId, targetSessionId, channelId)
+      return
+    }
+
     const locale = getLocale(channelId)
     const dir = process.env.SESSION_CWD ?? process.env.OPENCODE_CWD ?? process.cwd()
     const sessionsURL = `${serverUrl}/api/session?directory=${encodeURIComponent(normalizePath(dir))}`
@@ -722,7 +729,11 @@ export function createCommandHandler(deps: CommandHandlerDeps): CommandHandler {
     const locale = getLocale(channelId)
 
     if (args[0]) {
-      const targetProjectArg = args.join(" ").trim()
+      const targetProjectArg = args
+        .join(" ")
+        .trim()
+        .replace(/^\s*-\s*/, "")
+        .replace(/\\+/g, "/")
 
       if (!targetProjectArg) {
         await replyText(chatId, messageId, t(locale, "command.projectCreateFailed", { project: targetProjectArg || "(empty)", error: "Project path cannot be empty" }), channelId)
@@ -774,6 +785,14 @@ export function createCommandHandler(deps: CommandHandlerDeps): CommandHandler {
 
       process.env.SESSION_CWD = normalizePath(matched.worktree)
       logger.info(`/projects: switched to project "${matched.name || matched.worktree}" (${matched.worktree})`)
+
+      // Prefer the project's most recently active session; only create a new one when none exists.
+      const recentSessionId = await sessionManager.findRecentSession(process.env.SESSION_CWD)
+      if (recentSessionId) {
+        sessionManager.setMapping(feishuKey, recentSessionId)
+        await replyText(chatId, messageId, t(locale, "command.projectResumed", { project: matched.name || matched.worktree, sessionId: recentSessionId }), channelId)
+        return
+      }
 
       const newSessionResp = await fetch(`${serverUrl}/api/session`, {
         method: "POST",
@@ -1760,7 +1779,7 @@ export function createCommandHandler(deps: CommandHandlerDeps): CommandHandler {
           await handleAbort(feishuKey, chatId, messageId, channelId)
           return true
         case "/sessions":
-          await handleSessions(feishuKey, chatId, messageId, channelId)
+          await handleSessions(feishuKey, chatId, messageId, channelId, parts.slice(1))
           return true
         case "/projects":
           await handleProjects(feishuKey, chatId, messageId, channelId, parts.slice(1))

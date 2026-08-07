@@ -19,6 +19,7 @@ export interface SessionManager {
   deleteMapping(feishuKey: string): boolean
   setMapping(feishuKey: string, sessionId: string, agent?: string): boolean
   setModel(feishuKey: string, model: string | null): boolean
+  findRecentSession(directory: string): Promise<string | null>
   cleanup(maxAgeMs?: number): number
   validateAndCleanupStale(): Promise<number>
 }
@@ -28,6 +29,12 @@ interface TuiSession {
   title?: string
   directory?: string
   time?: { created: number; updated: number }
+}
+
+interface V2SessionInfo {
+  id: string
+  parentID?: string | null
+  time?: { created?: number; updated?: number }
 }
 
 export function createSessionManager(
@@ -137,6 +144,25 @@ export function createSessionManager(
     return data.id
   }
 
+  /** Query the opencode global API for the most recently active root session
+   *  in the given directory. Returns null on failure or when none exists. */
+
+  async function findRecentSession(directory: string): Promise<string | null> {
+    const url = `${serverUrl}/api/session?directory=${encodeURIComponent(directory)}&limit=100`
+
+    try {
+      const resp = await fetch(url)
+      if (!resp.ok) return null
+
+      const body = (await resp.json()) as { data: V2SessionInfo[] }
+      const roots = body.data.filter((session) => !session.parentID)
+      const recent = roots.sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))[0]
+      return recent?.id ?? null
+    } catch {
+      return null
+    }
+  }
+
   return {
     async getOrCreate(feishuKey, agent) {
       const existing = getStmt.get(feishuKey) as SessionMapping | null
@@ -207,6 +233,8 @@ export function createSessionManager(
       }
       return result.changes > 0
     },
+
+    findRecentSession,
 
     cleanup(maxAgeMs = 30 * 60 * 1000) {
       const cutoff = Date.now() - maxAgeMs

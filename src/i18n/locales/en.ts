@@ -42,6 +42,7 @@ export const en = {
     projectCreated: "Created and switched to project: {project}\nNew session: {sessionId}",
     projectCreateFailed: "Failed to create project: {project}\n{error}",
     projectSwitched: "Switched to project: {project}\nNew session: {sessionId}",
+    projectResumed: "Switched to project: {project}\nResumed recent session: {sessionId}",
     projectSwitchedNoSession: "Switched to project: {project}",
     wakeUnavailable: "Wake launcher is not configured. Set launcher.enabled, launcher.autoStartServer, and launcher.serverCommand first.",
     wakeStarting: "Waking the opencode server. Please wait...",

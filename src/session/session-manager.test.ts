@@ -480,6 +480,67 @@ describeOrSkip("session-manager", () => {
     })
   })
 
+  describe("findRecentSession", () => {
+    it("returns the most recently active root session for the directory", async () => {
+      mockFetch(async (input) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : (input as Request).url
+        if (url.includes("/api/session") && url.includes("directory=")) {
+          return new Response(
+            JSON.stringify({
+              data: [
+                { id: "ses-new-created", parentID: undefined, time: { created: 3000, updated: 3000 } },
+                { id: "ses-recent", parentID: undefined, time: { created: 1000, updated: 5000 } },
+                { id: "ses-child", parentID: "ses-new-created", time: { created: 4000, updated: 6000 } },
+                { id: "ses-old", parentID: undefined, time: { created: 500, updated: 1000 } },
+              ],
+            }),
+            { status: 200 },
+          )
+        }
+        return new Response("Not found", { status: 404 })
+      })
+
+      sm = createSessionManager({ serverUrl: SERVER_URL, db, defaultAgent: DEFAULT_AGENT })
+      const result = await sm.findRecentSession("/test/project")
+
+      // ses-child is more recently updated but is a child session — must be excluded
+      expect(result).toBe("ses-recent")
+    })
+
+    it("returns null when no sessions exist for the directory", async () => {
+      mockFetch(async () => {
+        return new Response(JSON.stringify({ data: [], cursor: {} }), { status: 200 })
+      })
+
+      sm = createSessionManager({ serverUrl: SERVER_URL, db, defaultAgent: DEFAULT_AGENT })
+      const result = await sm.findRecentSession("/test/project")
+
+      expect(result).toBeNull()
+    })
+
+    it("returns null when the API responds with a non-200 status", async () => {
+      mockFetch(async () => {
+        return new Response("Internal Server Error", { status: 500 })
+      })
+
+      sm = createSessionManager({ serverUrl: SERVER_URL, db, defaultAgent: DEFAULT_AGENT })
+      const result = await sm.findRecentSession("/test/project")
+
+      expect(result).toBeNull()
+    })
+
+    it("returns null when the API call throws a network error", async () => {
+      mockFetch(async () => {
+        throw new Error("Network error")
+      })
+
+      sm = createSessionManager({ serverUrl: SERVER_URL, db, defaultAgent: DEFAULT_AGENT })
+      const result = await sm.findRecentSession("/test/project")
+
+      expect(result).toBeNull()
+    })
+  })
+
   describe("setMapping", () => {
     it("resets agent and model when binding the same key to a different session", () => {
       sm = createSessionManager({ serverUrl: SERVER_URL, db, defaultAgent: DEFAULT_AGENT })
