@@ -168,12 +168,6 @@ async function main(): Promise<void> {
     directory: cwdBase,
     ...(authHeaders ? { headers: authHeaders } : {}),
   })
-  const normalizedOpencodeDirectory = normalizeDirectory(cwdBase)
-
-  function normalizeDirectory(directory: string): string {
-    const resolved = resolve(directory)
-    return process.platform === "win32" ? resolved.toLowerCase() : resolved
-  }
 
   async function waitForServer(maxRetries = 10): Promise<void> {
     const bootAttempt = await serviceLauncher?.ensureServerReady("startup")
@@ -481,16 +475,13 @@ async function main(): Promise<void> {
 
   function dispatchGlobalSseEvent(event: unknown): void {
     const globalEvent = event as Record<string, unknown>
-    const directory = globalEvent?.directory
     const payload = globalEvent?.payload
 
-    if (typeof directory === "string") {
-      const normalizedEventDirectory = normalizeDirectory(directory)
-      if (normalizedEventDirectory !== normalizedOpencodeDirectory) {
-        return
-      }
-    }
-
+    // Events are already routed precisely by sessionID in dispatchSseEvent.
+    // The directory filter was removed because it dropped events for sessions
+    // whose directory differs from the bridge's OPENCODE_CWD (e.g. a session
+    // bound via /connect or created in another project), causing "（无回复）"
+    // timeouts.
     dispatchSseEvent(payload)
   }
 
