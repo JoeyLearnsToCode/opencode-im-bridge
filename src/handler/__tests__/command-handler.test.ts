@@ -15,6 +15,7 @@ function createMockSessionManager(
     setMapping: vi.fn().mockReturnValue(true),
     setModel: vi.fn().mockReturnValue(true),
     findRecentSession: vi.fn().mockResolvedValue(null),
+      getRecentAssistantSummary: vi.fn().mockResolvedValue(null),
     cleanup: vi.fn().mockReturnValue(0),
     validateAndCleanupStale: vi.fn().mockResolvedValue(0),
   }
@@ -63,13 +64,15 @@ describe("createCommandHandler", () => {
 
   describe("/projects", () => {
     it("strips the \"- \" list prefix from the project argument", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () =>
-          Promise.resolve([
-            { id: "proj-1", name: "my-app", worktree: "D:/projects/my-app" },
-          ]),
-      })
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve([
+              { id: "proj-1", name: "my-app", worktree: "D:/projects/my-app" },
+            ]),
+        })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
       mockSessionManager.findRecentSession = vi.fn().mockResolvedValue("ses-recent-1")
       mockFeishuClient.replyMessage = vi.fn().mockResolvedValue({ code: 0, msg: "ok" })
 
@@ -82,13 +85,15 @@ describe("createCommandHandler", () => {
     })
 
     it("accepts backslash separators in the project path", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () =>
-          Promise.resolve([
-            { id: "proj-1", name: "my-app", worktree: "D:/projects/my-app" },
-          ]),
-      })
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve([
+              { id: "proj-1", name: "my-app", worktree: "D:/projects/my-app" },
+            ]),
+        })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
       mockSessionManager.findRecentSession = vi.fn().mockResolvedValue("ses-recent-1")
       mockFeishuClient.replyMessage = vi.fn().mockResolvedValue({ code: 0, msg: "ok" })
 
@@ -100,13 +105,15 @@ describe("createCommandHandler", () => {
     })
 
     it("accepts double-backslash separators in the project path", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () =>
-          Promise.resolve([
-            { id: "proj-1", name: "my-app", worktree: "D:/projects/my-app" },
-          ]),
-      })
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve([
+              { id: "proj-1", name: "my-app", worktree: "D:/projects/my-app" },
+            ]),
+        })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
       mockSessionManager.findRecentSession = vi.fn().mockResolvedValue("ses-recent-1")
       mockFeishuClient.replyMessage = vi.fn().mockResolvedValue({ code: 0, msg: "ok" })
 
@@ -117,14 +124,40 @@ describe("createCommandHandler", () => {
       expect(mockSessionManager.findRecentSession).toHaveBeenCalledWith("D:/projects/my-app")
     })
 
-    it("reuses the project's most recently active session when one exists", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () =>
-          Promise.resolve([
-            { id: "proj-1", name: "my-app", worktree: "D:/projects/my-app" },
-          ]),
+    it("appends the recent assistant summary when reusing a project session", async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve([
+              { id: "proj-1", name: "my-app", worktree: "D:/projects/my-app" },
+            ]),
+        })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
+      mockSessionManager.findRecentSession = vi.fn().mockResolvedValue("ses-recent-1")
+      mockSessionManager.getRecentAssistantSummary = vi.fn().mockResolvedValue({ text: "hello", tools: [] })
+      mockFeishuClient.replyMessage = vi.fn().mockResolvedValue({ code: 0, msg: "ok" })
+
+      const handler = createHandler()
+      const result = await handler("chat-1", "chat-1", "msg-1", "/projects my-app")
+
+      expect(result).toBe(true)
+      expect(mockFeishuClient.replyMessage).toHaveBeenCalledWith("msg-1", {
+        msg_type: "text",
+        content: JSON.stringify({ text: "已切换到项目: my-app\n已复用最近会话: ses-recent-1\n\n📝 最近助手消息:\nhello" }),
       })
+    })
+
+    it("reuses the project's most recently active session when one exists", async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve([
+              { id: "proj-1", name: "my-app", worktree: "D:/projects/my-app" },
+            ]),
+        })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
       mockSessionManager.findRecentSession = vi.fn().mockResolvedValue("ses-recent-1")
       mockFeishuClient.replyMessage = vi.fn().mockResolvedValue({ code: 0, msg: "ok" })
 
@@ -134,12 +167,38 @@ describe("createCommandHandler", () => {
       expect(result).toBe(true)
       expect(mockSessionManager.findRecentSession).toHaveBeenCalledWith("D:/projects/my-app")
       expect(mockSessionManager.setMapping).toHaveBeenCalledWith("chat-1", "ses-recent-1")
-      // No new session creation request
-      expect(mockFetch).toHaveBeenCalledTimes(1)
+      // No new session creation request — only /project list + /api/session supplement
+      expect(mockFetch).toHaveBeenCalledTimes(2)
       expect(mockFeishuClient.replyMessage).toHaveBeenCalledWith("msg-1", {
         msg_type: "text",
         content: JSON.stringify({ text: "已切换到项目: my-app\n已复用最近会话: ses-recent-1" }),
       })
+    })
+
+    it("supplements project records with directories from global sessions", async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve([{ id: "proj-1", name: "reg", worktree: "D:/projects/reg" }]),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve([
+              { directory: "D:/projects/extra", project: { worktree: "D:/projects/extra" } },
+              { directory: "D:/projects/reg", project: { worktree: "D:/projects/reg" } },
+            ]),
+        })
+      mockFeishuClient.replyMessage = vi.fn().mockResolvedValue({ code: 0, msg: "ok" })
+
+      const handler = createHandler()
+      const result = await handler("chat-1", "chat-1", "msg-1", "/projects")
+
+      expect(result).toBe(true)
+      const content = mockFeishuClient.replyMessage.mock.calls[0]?.[1]?.content as string
+      expect(content).toContain("reg")
+      expect(content).toContain("extra")
     })
 
     it("creates a new session when the project has no recent session", async () => {
@@ -151,6 +210,7 @@ describe("createCommandHandler", () => {
               { id: "proj-1", name: "my-app", worktree: "D:/projects/my-app" },
             ]),
         })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
         .mockResolvedValueOnce({
           ok: true,
           json: () => Promise.resolve({ data: { id: "ses-created-1" } }),
@@ -529,6 +589,22 @@ describe("createCommandHandler", () => {
       })
     })
 
+    it("appends the recent assistant summary and tools", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true })
+      mockSessionManager.getRecentAssistantSummary = vi.fn().mockResolvedValue({ text: "done", tools: ["shell", "read"] })
+      mockFeishuClient.replyMessage = vi.fn().mockResolvedValue({ code: 0, msg: "ok" })
+
+      const handler = createHandler()
+      const result = await handler("chat-1", "chat-1", "msg-1", "/connect ses-456")
+
+      expect(result).toBe(true)
+      expect(mockSessionManager.getRecentAssistantSummary).toHaveBeenCalledWith("ses-456")
+      expect(mockFeishuClient.replyMessage).toHaveBeenCalledWith("msg-1", {
+        msg_type: "text",
+        content: JSON.stringify({ text: "已连接到会话: ses-456\n\n📝 最近助手消息:\ndone\n🔧 工具: shell, read" }),
+      })
+    })
+
     it("replies with usage when session_id is missing", async () => {
       mockFeishuClient.replyMessage = vi.fn().mockResolvedValue({ code: 0, msg: "ok" })
 
@@ -540,6 +616,69 @@ describe("createCommandHandler", () => {
       expect(mockFeishuClient.replyMessage).toHaveBeenCalledWith("msg-1", {
         msg_type: "text",
         content: JSON.stringify({ text: "用法: /connect {session_id}" }),
+      })
+    })
+  })
+
+  describe("/message", () => {
+    it("shows the recent assistant summary for the given session without activating it", async () => {
+      mockSessionManager.getRecentAssistantSummary = vi.fn().mockResolvedValue({ text: "done", tools: ["shell"] })
+      mockFeishuClient.replyMessage = vi.fn().mockResolvedValue({ code: 0, msg: "ok" })
+
+      const handler = createHandler()
+      const result = await handler("chat-1", "chat-1", "msg-1", "/message ses-456")
+
+      expect(result).toBe(true)
+      expect(mockSessionManager.getRecentAssistantSummary).toHaveBeenCalledWith("ses-456")
+      expect(mockSessionManager.setMapping).not.toHaveBeenCalled()
+      expect(mockFetch).not.toHaveBeenCalled()
+      expect(mockFeishuClient.replyMessage).toHaveBeenCalledWith("msg-1", {
+        msg_type: "text",
+        content: JSON.stringify({ text: "📇 会话: ses-456\n\n📝 最近助手消息:\ndone\n🔧 工具: shell" }),
+      })
+    })
+
+    it("falls back to the bound session when session_id is omitted", async () => {
+      mockSessionManager.getRecentAssistantSummary = vi.fn().mockResolvedValue({ text: "hello", tools: [] })
+      mockFeishuClient.replyMessage = vi.fn().mockResolvedValue({ code: 0, msg: "ok" })
+
+      const handler = createHandler()
+      const result = await handler("chat-1", "chat-1", "msg-1", "/message")
+
+      expect(result).toBe(true)
+      // DEFAULT_MAPPING binds chat-1 -> ses-123
+      expect(mockSessionManager.getRecentAssistantSummary).toHaveBeenCalledWith("ses-123")
+      expect(mockFeishuClient.replyMessage).toHaveBeenCalledWith("msg-1", {
+        msg_type: "text",
+        content: JSON.stringify({ text: "📇 会话: ses-123\n\n📝 最近助手消息:\nhello" }),
+      })
+    })
+
+    it("replies when no session is bound and no session_id is given", async () => {
+      const sm = createMockSessionManager(null)
+      mockFeishuClient.replyMessage = vi.fn().mockResolvedValue({ code: 0, msg: "ok" })
+
+      const handler = createHandler(sm)
+      const result = await handler("chat-1", "chat-1", "msg-1", "/message")
+
+      expect(result).toBe(true)
+      expect(mockFeishuClient.replyMessage).toHaveBeenCalledWith("msg-1", {
+        msg_type: "text",
+        content: JSON.stringify({ text: "当前没有绑定的会话。请使用 /sessions 或 /new 创建。" }),
+      })
+    })
+
+    it("replies when the session has no assistant message to show", async () => {
+      mockSessionManager.getRecentAssistantSummary = vi.fn().mockResolvedValue(null)
+      mockFeishuClient.replyMessage = vi.fn().mockResolvedValue({ code: 0, msg: "ok" })
+
+      const handler = createHandler()
+      const result = await handler("chat-1", "chat-1", "msg-1", "/message ses-456")
+
+      expect(result).toBe(true)
+      expect(mockFeishuClient.replyMessage).toHaveBeenCalledWith("msg-1", {
+        msg_type: "text",
+        content: JSON.stringify({ text: "没有可显示的助手消息。" }),
       })
     })
   })

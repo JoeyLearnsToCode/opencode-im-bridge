@@ -20,8 +20,96 @@ export interface SessionManager {
   setMapping(feishuKey: string, sessionId: string, agent?: string): boolean
   setModel(feishuKey: string, model: string | null): boolean
   findRecentSession(directory: string): Promise<string | null>
+  getRecentAssistantSummary(sessionId: string): Promise<AssistantSummary | null>
   cleanup(maxAgeMs?: number): number
   validateAndCleanupStale(): Promise<number>
+}
+
+/** Cap for the recent-assistant-message summary, counted as CJK chars + English words.
+ *  Tune this constant when the threshold needs adjusting. */
+export const MAX_ASSISTANT_SUMMARY_LENGTH = 500
+
+export interface AssistantSummary {
+  text: string
+  tools: string[]
+}
+
+interface SummaryMessage {
+  role?: string
+  type?: string
+  text?: string
+  content?: Array<{ type?: string; text?: string; name?: string; tool?: string }>
+}
+
+const SUMMARY_TOKEN_RE =
+  /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]|[^\s\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+/g
+
+/** Count text as CJK chars (each = 1) plus whitespace-separated words (each = 1). */
+function countSummaryUnits(text: string): number {
+  let units = 0
+  for (const _ of text.matchAll(SUMMARY_TOKEN_RE)) units++
+  return units
+}
+
+/** Keep the first `maxUnits` units of text (CJK chars + words). */
+function truncateSummaryText(text: string, maxUnits: number): string {
+  if (countSummaryUnits(text) <= maxUnits) return text
+  let units = 0
+  let out = ""
+  for (const match of text.matchAll(SUMMARY_TOKEN_RE)) {
+    if (units >= maxUnits) break
+    out += match[0]
+    units++
+  }
+  return out
+}
+
+/** Walk messages newest-first, stopping at the first user message. Collects the
+ *  assistant text (capped at MAX_ASSISTANT_SUMMARY_LENGTH units) and the deduplicated
+ *  tool names (not counted toward the cap). Returns null when there is nothing to show. */
+export function buildRecentAssistantSummary(messages: SummaryMessage[]): AssistantSummary | null {
+  const texts: string[] = []
+  const tools: string[] = []
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]
+    if (!message) continue
+    const role = message.role ?? message.type
+    if (role === "user") break
+    if (role !== "assistant") continue
+    for (const part of message.content ?? []) {
+      if (part.type === "tool" && part.name) {
+        if (!tools.includes(part.name)) tools.push(part.name)
+      } else if (part.type === "tool" && part.tool) {
+        if (!tools.includes(part.tool)) tools.push(part.tool)
+      } else if (part.type === "text" && part.text) {
+        texts.push(part.text)
+      }
+    }
+  }
+
+  if (texts.length === 0 && tools.length === 0) return null
+
+  texts.reverse()
+
+  const kept: string[] = []
+  let keptUnits = 0
+  for (let i = texts.length - 1; i >= 0; i--) {
+    const text = texts[i]
+    if (text === undefined) continue
+    const units = countSummaryUnits(text)
+    if (keptUnits + units <= MAX_ASSISTANT_SUMMARY_LENGTH) {
+      kept.unshift(text)
+      keptUnits += units
+    } else if (keptUnits < MAX_ASSISTANT_SUMMARY_LENGTH) {
+      kept.unshift(truncateSummaryText(text, MAX_ASSISTANT_SUMMARY_LENGTH - keptUnits))
+      break
+    } else {
+      break
+    }
+  }
+
+  return { text: kept.join("\n"), tools }
 }
 
 interface TuiSession {
@@ -163,6 +251,48 @@ export function createSessionManager(
     }
   }
 
+  /** Try the paginated v2 endpoint first (newest page first). The response is
+   *  expected to be non-empty; some opencode versions return an empty `data` here,
+   *  in which case the v1 endpoint is used as a fallback. */
+
+  async function getRecentAssistantSummary(sessionId: string): Promise<AssistantSummary | null> {
+    const fromV2 = await fetchSummaryV2(sessionId)
+    if (fromV2) return fromV2
+    return fetchSummaryV1(sessionId)
+  }
+
+  async function fetchSummaryV2(sessionId: string): Promise<AssistantSummary | null> {
+    try {
+      const resp = await fetch(`${serverUrl}/api/session/${sessionId}/message?order=desc&limit=200`)
+      if (!resp.ok) return null
+      const body = (await resp.json()) as { data: SummaryMessage[] }
+      if (!Array.isArray(body.data) || body.data.length === 0) return null
+      // The API returns newest-first; the summarizer expects chronological (oldest-first).
+      return buildRecentAssistantSummary(body.data.slice().reverse())
+    } catch {
+      return null
+    }
+  }
+
+  /** v1 fallback — returns the whole session as WithParts ({ info.role, parts[] }). */
+
+  async function fetchSummaryV1(sessionId: string): Promise<AssistantSummary | null> {
+    try {
+      const resp = await fetch(`${serverUrl}/session/${sessionId}/message?limit=100`)
+      if (!resp.ok) return null
+      const messages = (await resp.json()) as Array<{
+        info?: { role?: string }
+        parts?: Array<{ type?: string; text?: string; name?: string; tool?: string }>
+      }>
+      if (!Array.isArray(messages) || messages.length === 0) return null
+      return buildRecentAssistantSummary(
+        messages.map((m) => ({ role: m.info?.role, content: m.parts ?? [] })),
+      )
+    } catch {
+      return null
+    }
+  }
+
   return {
     async getOrCreate(feishuKey, agent) {
       const existing = getStmt.get(feishuKey) as SessionMapping | null
@@ -235,6 +365,8 @@ export function createSessionManager(
     },
 
     findRecentSession,
+
+    getRecentAssistantSummary,
 
     cleanup(maxAgeMs = 30 * 60 * 1000) {
       const cutoff = Date.now() - maxAgeMs

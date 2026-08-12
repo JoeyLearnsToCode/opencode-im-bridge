@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { createSessionManager } from "./session-manager.js"
+import { createSessionManager, buildRecentAssistantSummary, MAX_ASSISTANT_SUMMARY_LENGTH } from "./session-manager.js"
 import type { SessionManager } from "./session-manager.js"
 
 const isBun = typeof (globalThis as any).Bun !== "undefined"
@@ -16,6 +16,65 @@ const DEFAULT_AGENT = "claude"
 function createTestDb(): Database {
   return new Database(":memory:")
 }
+
+describeOrSkip("buildRecentAssistantSummary", () => {
+  it("extracts text from the most recent assistant turn, stopping at user messages", () => {
+    const messages = [
+      { role: "user", text: "hello" },
+      { role: "assistant", content: [{ type: "text", text: "first reply" }] },
+      { role: "user", text: "again" },
+      { role: "assistant", content: [{ type: "reasoning", text: "think" }, { type: "text", text: "second reply" }] },
+    ]
+    const result = buildRecentAssistantSummary(messages)
+    expect(result?.text).toBe("second reply")
+    expect(result?.tools).toEqual([])
+  })
+
+  it("keeps only tool names, deduplicated, and excludes them from the text", () => {
+    const messages = [
+      { role: "user", text: "go" },
+      { role: "assistant", content: [
+        { type: "tool", tool: "shell" },
+        { type: "tool", tool: "shell" },
+        { type: "tool", name: "read" },
+        { type: "text", text: "done" },
+      ] },
+    ]
+    const result = buildRecentAssistantSummary(messages)
+    expect(result?.text).toBe("done")
+    expect(result?.tools).toEqual(["shell", "read"])
+  })
+
+  it("truncates a single long segment to MAX_ASSISTANT_SUMMARY_LENGTH CJK chars", () => {
+    const long = "字".repeat(MAX_ASSISTANT_SUMMARY_LENGTH + 100)
+    const messages = [
+      { role: "user", text: "go" },
+      { role: "assistant", content: [{ type: "text", text: long }] },
+    ]
+    const result = buildRecentAssistantSummary(messages)
+    expect(result!.text.length).toBe(MAX_ASSISTANT_SUMMARY_LENGTH)
+  })
+
+  it("drops older segments beyond the budget, keeping the newest", () => {
+    const messages = [
+      { role: "user", text: "go" },
+      { role: "assistant", content: [{ type: "text", text: "A ".repeat(400) }] },
+      { role: "assistant", content: [{ type: "text", text: "B ".repeat(200) }] },
+      { role: "assistant", content: [{ type: "text", text: "C ".repeat(100) }] },
+    ]
+    const result = buildRecentAssistantSummary(messages)
+    const aCount = (result!.text.match(/A/g) ?? []).length
+    expect(aCount).toBeLessThan(400)
+    expect(result!.text).toContain("C ")
+    expect(result!.text.lastIndexOf("C ")).toBeGreaterThan(result!.text.lastIndexOf("A "))
+  })
+
+  it("returns null when there is no assistant content", () => {
+    expect(buildRecentAssistantSummary([])).toBeNull()
+    expect(buildRecentAssistantSummary([{ role: "user", text: "hi" }])).toBeNull()
+    expect(buildRecentAssistantSummary([{ role: "system", text: "sys" }])).toBeNull()
+  })
+})
 
 describeOrSkip("session-manager", () => {
   let db: Database

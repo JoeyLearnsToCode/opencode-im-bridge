@@ -689,7 +689,52 @@ export function createCommandHandler(deps: CommandHandlerDeps): CommandHandler {
     }
 
     logger.info(`/connect: bound ${feishuKey} to session ${targetSessionId}`)
-    await replyText(chatId, messageId, t(locale, "command.connectedToSession", { sessionId: targetSessionId }), channelId)
+    const extra = await buildRecentSummarySuffix(targetSessionId, locale)
+    await replyText(chatId, messageId, t(locale, "command.connectedToSession", { sessionId: targetSessionId }) + extra, channelId)
+  }
+
+  /** Append the most recent assistant message summary to a connect/resume reply. */
+
+  async function buildRecentSummarySuffix(sessionId: string, locale: ReturnType<typeof getLocale>): Promise<string> {
+    const summary = await sessionManager.getRecentAssistantSummary(sessionId)
+    if (!summary) return ""
+    let suffix = `\n\n${t(locale, "command.recentAssistant", { text: summary.text })}`
+    if (summary.tools.length > 0) {
+      suffix += `\n${t(locale, "command.recentAssistantTools", { tools: summary.tools.join(", ") })}`
+    }
+    return suffix
+  }
+
+    /** Show the recent assistant message summary for the given session (or the bound one). */
+
+  async function handleMessage(
+    feishuKey: string,
+    chatId: string,
+    messageId: string,
+    args: string[],
+    channelId: string,
+  ): Promise<void> {
+    const locale = getLocale(channelId)
+    let sessionId = args[0]
+    if (!sessionId) {
+      sessionId = sessionManager.getSession(feishuKey)?.session_id
+    }
+    if (!sessionId) {
+      await replyText(chatId, messageId, t(locale, "command.noSessionBound"), channelId)
+      return
+    }
+
+    const summary = await sessionManager.getRecentAssistantSummary(sessionId)
+    if (!summary) {
+      await replyText(chatId, messageId, t(locale, "command.noAssistantSummary"), channelId)
+      return
+    }
+
+    let text = `${t(locale, "command.messageHeader", { sessionId })}\n\n${t(locale, "command.recentAssistant", { text: summary.text })}`
+    if (summary.tools.length > 0) {
+      text += `\n${t(locale, "command.recentAssistantTools", { tools: summary.tools.join(", ") })}`
+    }
+    await replyText(chatId, messageId, text, channelId)
   }
 
   async function handleSessionCommand(
@@ -719,6 +764,46 @@ export function createCommandHandler(deps: CommandHandlerDeps): CommandHandler {
     await replyText(chatId, messageId, t(locale, "command.executing", { command, sessionId: mapping.session_id }), channelId)
   }
 
+  /** List all known projects. `/project` only returns project records registered in the
+   *  opencode database, which can miss projects that were opened without a record — so it is
+   *  supplemented by deriving directories from every global session via the experimental
+   *  `/experimental/session` endpoint. */
+
+  async function listAllProjects(): Promise<ProjectInfo[]> {
+    const byWorktree = new Map<string, ProjectInfo>()
+
+    try {
+      const resp = await fetch(`${serverUrl}/project`)
+      if (resp.ok) {
+        const projects = (await resp.json()) as ProjectInfo[]
+        for (const project of projects) {
+          if (project?.worktree) byWorktree.set(normalizePath(project.worktree).toLowerCase(), project)
+        }
+      }
+    } catch {
+      // Ignore — fall back to session-derived projects below.
+    }
+
+    try {
+      const resp = await fetch(`${serverUrl}/experimental/session?limit=200`)
+      if (resp.ok) {
+        const sessions = (await resp.json()) as Array<{ directory?: string; project?: { worktree?: string } }>
+        for (const session of sessions) {
+          const directory = session.project?.worktree ?? session.directory
+          if (!directory) continue
+          const key = normalizePath(directory).toLowerCase()
+          if (!byWorktree.has(key)) {
+            byWorktree.set(key, { id: `dir:${key}`, worktree: directory })
+          }
+        }
+      }
+    } catch {
+      // Ignore — session-derived projects are a best-effort supplement.
+    }
+
+    return [...byWorktree.values()]
+  }
+
   async function handleProjects(
     feishuKey: string,
     chatId: string,
@@ -743,12 +828,7 @@ export function createCommandHandler(deps: CommandHandlerDeps): CommandHandler {
         await replyText(chatId, messageId, t(locale, "command.projectCreateFailed", { project: targetProjectArg, error: "Path traversal (\"..\") is not allowed" }), channelId)
         return
       }
-      const resp = await fetch(`${serverUrl}/project`)
-      if (!resp.ok) {
-        throw new Error(`List projects failed: HTTP ${resp.status}`)
-      }
-
-      const projects = (await resp.json()) as ProjectInfo[]
+      const projects = await listAllProjects()
       const normalizedArg = normalizePath(targetProjectArg).toLowerCase()
       const matched = projects.find((p) => {
         const name = p.name || p.worktree.split("/").pop() || p.worktree
@@ -790,7 +870,8 @@ export function createCommandHandler(deps: CommandHandlerDeps): CommandHandler {
       const recentSessionId = await sessionManager.findRecentSession(process.env.SESSION_CWD)
       if (recentSessionId) {
         sessionManager.setMapping(feishuKey, recentSessionId)
-        await replyText(chatId, messageId, t(locale, "command.projectResumed", { project: matched.name || matched.worktree, sessionId: recentSessionId }), channelId)
+        const extra = await buildRecentSummarySuffix(recentSessionId, locale)
+        await replyText(chatId, messageId, t(locale, "command.projectResumed", { project: matched.name || matched.worktree, sessionId: recentSessionId }) + extra, channelId)
         return
       }
 
@@ -812,12 +893,7 @@ export function createCommandHandler(deps: CommandHandlerDeps): CommandHandler {
       return
     }
 
-    const resp = await fetch(`${serverUrl}/project`)
-    if (!resp.ok) {
-      throw new Error(`List projects failed: HTTP ${resp.status}`)
-    }
-
-    const projects = (await resp.json()) as ProjectInfo[]
+    const projects = await listAllProjects()
     if (projects.length === 0) {
       await replyText(chatId, messageId, t(locale, "command.noProjects"), channelId)
       return
@@ -861,6 +937,7 @@ export function createCommandHandler(deps: CommandHandlerDeps): CommandHandler {
 
 \`/new\` - ${t(locale, "help.new")}
 \`/sessions\` - ${t(locale, "help.sessions")}
+\`/message {session_id}\` - ${t(locale, "help.message")}
 \`/projects\` - ${t(locale, "help.projects")}
 \`/status\` - ${t(locale, "help.status")}
 \`/wake\` - ${t(locale, "help.wake")}
@@ -1793,6 +1870,9 @@ export function createCommandHandler(deps: CommandHandlerDeps): CommandHandler {
           await handleConnect(feishuKey, chatId, messageId, targetSessionId, channelId)
           return true
         }
+        case "/message":
+          await handleMessage(feishuKey, chatId, messageId, parts.slice(1), channelId)
+          return true
         case "/cron":
           await handleCron(feishuKey, chatId, messageId, channelId, parts.slice(1))
           return true

@@ -58,6 +58,7 @@
 - `/new`：新建会话（并自动绑定到当前聊天）
 - `/sessions`：获取最近会话列表及当前绑定状态（飞书返回交互式卡片，QQ 返回文本列表）；可选带 `{session_id}`，效果等同 `/connect {session_id}`
 - `/connect {session_id}`：将当前聊天连接/绑定到指定的历史会话
+- `/message {session_id}`：查看指定会话（缺省为当前绑定会话）最近的助手消息摘要
 - `/compact`：执行上下文历史压缩（对应 `session.compact`）
 - `/share`：分享当前会话（对应 `session.share`）
 - `/abort`：中止当前正在执行的任务

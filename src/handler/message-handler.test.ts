@@ -49,6 +49,7 @@ function makeDeps(overrides: Partial<HandlerDeps> = {}): HandlerDeps {
       deleteMapping: vi.fn().mockReturnValue(true),
       setMapping: vi.fn().mockReturnValue(true),
       findRecentSession: vi.fn().mockResolvedValue(null),
+      getRecentAssistantSummary: vi.fn().mockResolvedValue(null),
       cleanup: vi.fn().mockReturnValue(0),
       validateAndCleanupStale: vi.fn().mockResolvedValue(0),
     },
@@ -1267,6 +1268,7 @@ describe("createMessageHandler — 404 session self-healing", () => {
       deleteMapping: vi.fn().mockReturnValue(true),
       setMapping: vi.fn().mockReturnValue(true),
       findRecentSession: vi.fn().mockResolvedValue(null),
+      getRecentAssistantSummary: vi.fn().mockResolvedValue(null),
       cleanup: vi.fn().mockReturnValue(0),
       validateAndCleanupStale: vi.fn().mockResolvedValue(0),
     }
@@ -1321,6 +1323,7 @@ describe("createMessageHandler — 404 session self-healing", () => {
       deleteMapping: vi.fn().mockReturnValue(true),
       setMapping: vi.fn().mockReturnValue(true),
       findRecentSession: vi.fn().mockResolvedValue(null),
+      getRecentAssistantSummary: vi.fn().mockResolvedValue(null),
       cleanup: vi.fn().mockReturnValue(0),
       validateAndCleanupStale: vi.fn().mockResolvedValue(0),
     }
@@ -1385,6 +1388,7 @@ describe("createMessageHandler — streaming 404 session self-healing", () => {
       deleteMapping: vi.fn().mockReturnValue(true),
       setMapping: vi.fn().mockReturnValue(true),
       findRecentSession: vi.fn().mockResolvedValue(null),
+      getRecentAssistantSummary: vi.fn().mockResolvedValue(null),
       cleanup: vi.fn().mockReturnValue(0),
       validateAndCleanupStale: vi.fn().mockResolvedValue(0),
     }
@@ -1455,6 +1459,7 @@ describe("createMessageHandler — streaming 404 session self-healing", () => {
       deleteMapping: vi.fn().mockReturnValue(true),
       setMapping: vi.fn().mockReturnValue(true),
       findRecentSession: vi.fn().mockResolvedValue(null),
+      getRecentAssistantSummary: vi.fn().mockResolvedValue(null),
       cleanup: vi.fn().mockReturnValue(0),
       validateAndCleanupStale: vi.fn().mockResolvedValue(0),
     }
